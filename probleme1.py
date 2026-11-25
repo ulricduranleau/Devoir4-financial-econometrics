@@ -5,7 +5,7 @@ Problème 1 b) : statistiques descriptives et graphiques.
 Problème 1 c) : modèle linéaire d'évaluation d'actifs en deux passes, estimé avec
                 linearmodels (pip install linearmodels), présenté à la Session 8.
 
-Tous les tableaux (.csv) et graphiques (.png) sont enregistrés dans resultats/,
+Tous les tableaux (.csv) et graphiques (.png) sont enregistrés dans resultats_probleme1/,
 sous le nom <question>_<titre> (p. ex. Q1b_fig3_correlations_facteurs_heatmap.png).
 
 Sources :
@@ -37,7 +37,7 @@ from scipy import stats as sps
 DATA_DIR = Path(__file__).resolve().parent
 
 # Dossier où sont enregistrés tous les tableaux et graphiques produits par ce code
-RESULTS_DIR = DATA_DIR / "resultats"
+RESULTS_DIR = DATA_DIR / "resultats_probleme1"
 
 # Période d'échantillonnage demandée
 START, END = "1980-01", "2021-12"
@@ -51,7 +51,7 @@ _DATA_ROW = re.compile(r"^\s*\d{4,6}\s*,")
 
 def save_table(df, question, titre):
     """
-    Enregistre un tableau dans resultats/ sous le nom <question>_<titre>.csv
+    Enregistre un tableau dans resultats_probleme1/ sous le nom <question>_<titre>.csv
     (p. ex. Q1a_factors_statistiques_descriptives.csv), pour identifier
     clairement la question et le contenu de chaque fichier.
     """
@@ -63,7 +63,7 @@ def save_table(df, question, titre):
 
 
 def save_figure(fig, question, titre):
-    """Enregistre un graphique dans resultats/ sous le nom <question>_<titre>.png."""
+    """Enregistre un graphique dans resultats_probleme1/ sous le nom <question>_<titre>.png."""
     RESULTS_DIR.mkdir(exist_ok=True)
     path = RESULTS_DIR / f"{question}_{titre}.png"
     fig.savefig(path, dpi=200, bbox_inches="tight")
@@ -360,7 +360,7 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
     """
     Problème 1 b) : statistiques descriptives et graphiques.
 
-    Graphiques (resultats/Q1b_fig*.png) :
+    Graphiques (resultats_probleme1/Q1b_fig*.png) :
       1. séries temporelles des 6 facteurs                      [exigé (i)]
       2. séries temporelles des 17 portefeuilles sectoriels     [exigé (ii)]
       3. carte de chaleur des corrélations entre facteurs       [exigé (iii)]
@@ -368,7 +368,7 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
       5. volatilité annualisée des facteurs : « quels facteurs sont les plus volatils ? »
       6. excédent moyen des portefeuilles avec IC 95 % : « plus élevés / plus bas ? »
       7. rendements cumulés des facteurs : primes réalisées dans le temps
-    Tableaux (resultats/Q1b_*.csv) : statistiques annualisées des facteurs et des
+    Tableaux (resultats_probleme1/Q1b_*.csv) : statistiques annualisées des facteurs et des
     portefeuilles, matrice de corrélation des facteurs et corrélations par paire
     sur deux sous-périodes (« colinéarité potentielle » dans les régressions).
     """
@@ -764,7 +764,7 @@ if __name__ == "__main__":
         print("\nStatistiques descriptives :")
         print(stats.round(2))
 
-        # Exportation dans resultats/ : données complètes (dont les 5 premières lignes)
+        # Exportation dans resultats_probleme1/ : données complètes (dont les 5 premières lignes)
         # et statistiques descriptives
         save_table(df, "Q1a", f"{name}_exces_rendements_mensuels_1980-2021")
         save_table(stats, "Q1a", f"{name}_statistiques_descriptives")
