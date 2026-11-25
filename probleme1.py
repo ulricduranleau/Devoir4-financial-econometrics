@@ -58,7 +58,6 @@ def save_table(df, question, titre):
     RESULTS_DIR.mkdir(exist_ok=True)
     path = RESULTS_DIR / f"{question}_{titre}.csv"
     df.to_csv(path, float_format="%.4f")  # 4 décimales : évite le bruit de virgule flottante
-    print(f"  -> {path.relative_to(DATA_DIR)}")
     return path
 
 
@@ -67,7 +66,6 @@ def save_figure(fig, question, titre):
     RESULTS_DIR.mkdir(exist_ok=True)
     path = RESULTS_DIR / f"{question}_{titre}.png"
     fig.savefig(path, dpi=200, bbox_inches="tight")
-    print(f"  -> {path.relative_to(DATA_DIR)}")
     return path
 
 
@@ -772,11 +770,9 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # Problème 1 b) : statistiques descriptives et graphiques
     # ------------------------------------------------------------------
-    print("\n===== Q1b - statistiques descriptives et graphiques =====")
     q1b = Q1b_StatistiquesGraphiques(factors, portfolios)
 
     # ------------------------------------------------------------------
     # Problème 1 c) : modèle en deux passes, Traded=True et Traded=False
     # ------------------------------------------------------------------
-    print("\n===== Q1c - modèle linéaire d'évaluation d'actifs en deux passes =====")
     q1c_out, q1c_res = Q1c_Resultats(factors, portfolios)
