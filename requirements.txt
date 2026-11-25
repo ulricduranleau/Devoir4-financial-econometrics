@@ -1,0 +1,9 @@
+# Installation : python -m pip install -r requirements.txt
+# linearmodels est fixé à 7.1 : les versions antérieures calculent le test J de
+# LinearFactorModel avec une pseudo-inverse qui gonfle la statistique
+# (J = 4,64 au lieu de 4,135 pour la question 1 c), Traded=False).
+linearmodels==7.1
+numpy==2.5.2
+pandas==3.0.5
+scipy==1.18.1
+matplotlib==3.11.2

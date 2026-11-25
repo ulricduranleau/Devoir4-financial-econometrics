@@ -36,7 +36,8 @@ def save_figure(fig, question, titre):
     """Enregistre un graphique dans resultats_probleme2/ sous le nom <question>_<titre>.png."""
     RESULTS_DIR.mkdir(exist_ok=True)
     path = RESULTS_DIR / f"{question}_{titre}.png"
-    fig.savefig(path, dpi=200, bbox_inches="tight")
+    # Sans la version de matplotlib dans le PNG : fichier identique d'une machine à l'autre
+    fig.savefig(path, dpi=200, bbox_inches="tight", metadata={"Software": None})
     return path
 
 

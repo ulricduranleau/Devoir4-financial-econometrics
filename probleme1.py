@@ -27,11 +27,20 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import linearmodels
 from linearmodels.asset_pricing import LinearFactorModel, TradedFactorModel
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
 from scipy import stats as sps
+
+# linearmodels doit être en version 7.1 (voir requirements.txt) : avant 7.1, le
+# test J de LinearFactorModel utilisait une pseudo-inverse qui gonfle la
+# statistique, ce qui changerait les résultats de la question 1 c).
+if linearmodels.__version__ != "7.1":
+    raise ImportError(
+        f"linearmodels {linearmodels.__version__} détecté, la version 7.1 est requise : "
+        "python -m pip install -r requirements.txt")
 
 # Dossier contenant les CSV (le même que ce script)
 DATA_DIR = Path(__file__).resolve().parent
@@ -65,7 +74,10 @@ def save_figure(fig, question, titre):
     """Enregistre un graphique dans resultats_probleme1/ sous le nom <question>_<titre>.png."""
     RESULTS_DIR.mkdir(exist_ok=True)
     path = RESULTS_DIR / f"{question}_{titre}.png"
-    fig.savefig(path, dpi=200, bbox_inches="tight")
+    # metadata={"Software": None} : n'inscrit pas la version de matplotlib dans le
+    # PNG, pour que le fichier soit identique d'un ordinateur à l'autre (sinon git
+    # voit un « changement » à chaque exécution sur une autre machine).
+    fig.savefig(path, dpi=200, bbox_inches="tight", metadata={"Software": None})
     return path
 
 
