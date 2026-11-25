@@ -2,8 +2,8 @@
 MATH 60231 - Devoir #4
 Problème 1 a) : chargement des données de la bibliothèque de Ken French.
 Problème 1 b) : statistiques descriptives et graphiques.
-Problème 1 c) : modèle linéaire d'évaluation d'actifs en deux passes, codé à la
-                main et vérifié avec linearmodels (pip install linearmodels).
+Problème 1 c) : modèle linéaire d'évaluation d'actifs en deux passes, estimé avec
+                linearmodels (pip install linearmodels), présenté à la Session 8.
 
 Tous les tableaux (.csv) et graphiques (.png) sont enregistrés dans resultats/,
 sous le nom <question>_<titre> (p. ex. Q1b_fig3_correlations_facteurs_heatmap.png).
@@ -12,6 +12,8 @@ Sources :
 - Données : Kenneth R. French Data Library
   https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
   (fichiers CSV téléchargés et placés dans le même dossier que ce script)
+- Modèle en deux passes : package linearmodels de Kevin Sheppard
+  https://bashtage.github.io/linearmodels/asset-pricing/index.html
 - Dates des récessions américaines : NBER Business Cycle Dating Committee
   https://www.nber.org/research/data/us-business-cycle-expansions-and-contractions
 """
@@ -25,6 +27,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from linearmodels.asset_pricing import LinearFactorModel, TradedFactorModel
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
@@ -499,142 +502,53 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
 # Problème 1 c) : modèle linéaire d'évaluation d'actifs en deux passes
 # ======================================================================
 #
-# Références : Session 8 (« Pricing Financial Assets ») : modèle (6), tests
-# t de tarification des facteurs, tests J, et distinction rendements excédentaires
-# / facteurs non négociés ; Cochrane (2005), Asset Pricing, ch. 12-13 (GMM),
-# cité dans la Session 8.
-#
-# Notation : T mois, N actifs, K facteurs. R (T x N) : excédents de rendement des
-# actifs ; F (T x K) : facteurs ; X = [1, F] (T x (K+1)).
-#
-# Erreurs-types robustes à l'hétéroscédasticité (White) avec correction des degrés
-# de liberté : la matrice « viande » S = g'g / T est divisée par T - (K+1), comme
-# dans linearmodels (cov_type="robust", debiased=True), qui sert de vérification.
-
-
-def _first_pass(F, R):
-    """
-    (i) Passe en séries temporelles : pour chaque actif i, MCO de r_it sur une
-    constante et les K facteurs. Les N régressions ont les mêmes régresseurs X,
-    donc on les résout en une seule opération matricielle : B = (X'X)^-1 X'R.
-
-    Retourne B ((K+1) x N : ligne 0 = alphas, lignes 1.. = bêtas), les résidus
-    E (T x N), X et A = (X'X / T)^-1.
-    """
-    T = F.shape[0]
-    X = np.column_stack([np.ones(T), F])
-    B = np.linalg.solve(X.T @ X, X.T @ R)
-    E = R - X @ B
-    A = np.linalg.inv(X.T @ X / T)
-    return B, E, X, A
+# Estimation avec linearmodels (Kevin Sheppard), le package présenté à la
+# Session 8 (« Pricing Financial Assets », diapositives 21 à 24) :
+#   - Traded=True  -> TradedFactorModel : facteurs ET actifs sont des excédents de
+#     rendement (cas 1 de la diapositive 24). Chaque facteur est lui-même un actif,
+#     donc sa prime de risque est son rendement moyen : lambda = moyenne de F.
+#     Test J : H0 : alpha_i = 0 pour tout i, J ~ chi²(N).
+#   - Traded=False -> LinearFactorModel(risk_free=False) : seuls les actifs sont des
+#     excédents de rendement (cas 3). lambda est obtenu par la régression
+#     transversale des r̄_i sur les bêtas estimés, sans constante (le taux sans
+#     risque est déjà retiré). Les erreurs-types tiennent compte du fait que les
+#     bêtas sont estimés (GMM ; Cochrane, 2005, ch. 12-13, cité à la Session 8).
+#     Test J : J ~ chi²(N - K), car K degrés de liberté servent à estimer lambda.
+# Covariance robuste à l'hétéroscédasticité (White), avec correction des degrés
+# de liberté : cov_type="robust", debiased=True.
+# Documentation : https://bashtage.github.io/linearmodels/asset-pricing/index.html
 
 
 def _two_pass(Factors, Assets, Traded):
     """
-    Estimation complète du modèle en deux passes (calculs « à la main »).
-    Retourne un dictionnaire avec toutes les quantités (y compris les alphas,
-    utiles pour l'interprétation) ; Q1_AssetPricingModel en extrait les sorties
-    demandées.
+    Estime le modèle en deux passes avec linearmodels et rassemble toutes les
+    quantités utiles (y compris les alphas, pour l'interprétation) dans un
+    dictionnaire ; Q1_AssetPricingModel en extrait les sorties demandées.
     """
-    F, R = Factors.values, Assets.values
-    T, K = F.shape
-    N = R.shape[1]
-    dof = T - (K + 1)                      # correction des degrés de liberté
-    rbar = R.mean(axis=0)                  # moyennes temporelles des excédents
+    model = (TradedFactorModel(Assets, Factors) if Traded
+             else LinearFactorModel(Assets, Factors, risk_free=False))
+    fit = model.fit(cov_type="robust", debiased=True)
 
-    # ---- (i) Passe en séries temporelles ----
-    B, E, X, A = _first_pass(F, R)
-    alpha_ts, beta = B[0], B[1:].T         # alpha (N,), bêtas (N x K)
+    lam = fit.risk_premia                  # primes de risque lambda (K)
+    beta = fit.betas                       # expositions beta (N x K), passe temporelle
+    alpha = fit.params["alpha"]            # erreurs de valorisation alpha (N)
+    rbar = Assets.mean()                   # rendements excédentaires moyens r̄_i
+    predit = beta @ lam                    # rendements moyens prédits beta_i' lambda
 
-    # Covariance robuste (White) des coefficients de chaque régression :
-    # V(b_i) = A [ sum_t x_t x_t' e_it² / T ] A / (T-K-1). Vectorisé : avec
-    # Z = X A, la variance du coefficient k de l'actif i est sum_t Z_tk² e_it² / T / dof.
-    Z = X @ A
-    se_B = np.sqrt((Z ** 2).T @ (E ** 2) / T / dof)     # (K+1) x N
-    beta_t = (B[1:] / se_B[1:]).T                        # N x K
+    # R² de la régression transversale : part de la dispersion des r̄_i expliquée
+    # par beta_i' lambda. On le calcule ici, car fit.rsquared de linearmodels est
+    # le R² des régressions temporelles (passe 1), pas celui demandé.
+    r2 = 1 - (alpha ** 2).sum() / ((rbar - rbar.mean()) ** 2).sum()
 
-    if Traded:
-        # ---- (ii) Facteurs négociés (excédents de rendement d'actifs) ----
-        # Chaque facteur est lui-même un actif : sa prime de risque est son
-        # rendement moyen, lambda = moyenne de F (le modèle doit « tarifer » les
-        # facteurs eux-mêmes avec alpha = 0). Écart-type robuste de la moyenne.
-        lam = F.mean(axis=0)
-        lam_se = F.std(axis=0, ddof=1) / np.sqrt(T)
-        lam_vcv = np.diag(lam_se ** 2)
-        # Erreurs de valorisation = alphas de la passe temporelle, puisque
-        # r̄_i = alpha_i + beta_i' F̄ exactement (propriété des MCO).
-        alpha = alpha_ts
-        # Covariance robuste conjointe des N alphas : u_it = (x_t' a0) e_it, où
-        # a0 est la 1re colonne de A ; V(alpha) = U'U / T / dof.
-        U = Z[:, [0]] * E
-        alpha_vcv = U.T @ U / T / dof
-        # Test J : H0 : alpha_i = 0 pour tout i ; J = alpha' V^-1 alpha ~ chi²(N)
-        J = float(alpha @ np.linalg.solve(alpha_vcv, alpha))
-        J_df = N
-    else:
-        # ---- (ii) Passe transversale (facteurs traités comme non négociés) ----
-        # MCO des N moyennes r̄_i sur les bêtas estimés, SANS constante : les
-        # actifs sont des excédents de rendement, donc la constante (taux sans
-        # risque / taux zéro-bêta) vaut 0 sous le modèle (Session 8, éq. (9)).
-        lam = np.linalg.lstsq(beta, rbar, rcond=None)[0]
-        alpha = rbar - beta @ lam          # erreurs de valorisation transversales
-
-        # Erreurs-types : les bêtas sont estimés (problème d'erreurs sur les
-        # variables), donc on écrit les deux passes comme un GMM exactement
-        # identifié (Cochrane, 2005, ch. 12-13), paramètres theta = (b, lambda, alpha) :
-        #   g1_t = x_t ⊗ e_t              (N(K+1) moments, passe temporelle)
-        #   g2_t = beta' (r_t - beta·lambda)   (K moments, passe transversale)
-        #   g3_t = (r_t - beta·lambda) - alpha (N moments, erreurs de valorisation)
-        # V(theta) = D^-1 S D^-1' / dof, avec S = g'g / T et D = E[dg/dtheta'].
-        P = R - beta @ lam                              # T x N
-        g1 = (X[:, None, :] * E[:, :, None]).reshape(T, N * (K + 1))
-        g2 = P @ beta
-        g3 = P - alpha
-        G = np.hstack([g1, g2, g3])
-        S = G.T @ G / T
-
-        nb = N * (K + 1)
-        D = np.zeros((nb + K + N, nb + K + N))
-        D[:nb, :nb] = -np.kron(np.eye(N), X.T @ X / T)          # dg1/db
-        for i in range(N):
-            cols = slice(i * (K + 1) + 1, (i + 1) * (K + 1))    # bêtas de l'actif i
-            D[nb:nb + K, cols] = alpha[i] * np.eye(K) - np.outer(beta[i], lam)  # dg2/dbeta_i
-            D[nb + K + i, cols] = -lam                          # dg3_i/dbeta_i
-        D[nb:nb + K, nb:nb + K] = -beta.T @ beta                # dg2/dlambda
-        D[nb + K:, nb:nb + K] = -beta                           # dg3/dlambda
-        D[nb + K:, nb + K:] = -np.eye(N)                        # dg3/dalpha
-        Di = np.linalg.inv(D)
-        V = Di @ S @ Di.T / dof
-        lam_vcv = V[nb:nb + K, nb:nb + K]
-        lam_se = np.sqrt(np.diag(lam_vcv))
-        alpha_vcv = V[nb + K:, nb + K:]
-
-        # Test J : les K conditions beta' alpha = 0 sont imposées par la passe
-        # transversale, donc les erreurs de valorisation vivent dans un espace de
-        # dimension N - K. On projette sur une base orthonormée Q de cet espace :
-        # J = (Q'alpha)' (Q' V(alpha) Q)^-1 (Q'alpha) ~ chi²(N - K).
-        Q = np.linalg.svd(beta)[0][:, K:]
-        qa = Q.T @ alpha
-        J = float(qa @ np.linalg.solve(Q.T @ alpha_vcv @ Q, qa))
-        J_df = N - K
-
-    # R² de la régression transversale : part de la dispersion des rendements
-    # moyens r̄_i expliquée par les rendements prédits beta_i' lambda
-    # R² = 1 - sum(alpha_i²) / sum((r̄_i - moyenne de r̄)²)
-    r2 = 1 - np.sum(alpha ** 2) / np.sum((rbar - rbar.mean()) ** 2)
-
-    f_names, a_names = list(Factors.columns), list(Assets.columns)
+    J = fit.j_statistic
     return {
-        "lambda": pd.Series(lam, index=f_names), "lambda_se": pd.Series(lam_se, index=f_names),
-        "lambda_vcv": lam_vcv,
-        "beta": pd.DataFrame(beta, index=a_names, columns=f_names),
-        "beta_t": pd.DataFrame(beta_t, index=a_names, columns=f_names),
-        "alpha": pd.Series(alpha, index=a_names),
-        "alpha_t": pd.Series(alpha / np.sqrt(np.diag(alpha_vcv)), index=a_names),
-        "rbar": pd.Series(rbar, index=a_names),
-        "predit": pd.Series(beta @ lam, index=a_names),
-        "r2": float(r2), "J": J, "J_df": J_df, "J_p": float(sps.chi2.sf(J, J_df)),
-        "T": T, "N": N, "K": K, "Traded": Traded,
+        "lambda": lam, "lambda_se": fit.risk_premia_se,
+        "beta": beta, "beta_t": fit.tstats[beta.columns],
+        "alpha": alpha, "alpha_t": fit.tstats["alpha"],
+        "rbar": rbar, "predit": predit,
+        "r2": float(r2), "J": float(J.stat), "J_df": int(J.df), "J_p": float(J.pval),
+        "T": Factors.shape[0], "N": Assets.shape[1], "K": Factors.shape[1],
+        "Traded": Traded,
     }
 
 
@@ -680,56 +594,15 @@ def Q1_AssetPricingModel(Factors, Assets, Traded):
     return lam, lam_t, res["beta"], res["beta_t"], res["r2"], jtest
 
 
-def verify_with_linearmodels(Factors, Assets, Traded):
-    """
-    Vérifie les calculs « à la main » avec linearmodels (Session 8) :
-    TradedFactorModel si Traded=True, LinearFactorModel(risk_free=False) sinon,
-    covariance robuste à l'hétéroscédasticité avec correction des degrés de liberté.
-    Retourne l'écart absolu maximal pour chaque quantité.
-    """
-    from linearmodels.asset_pricing import LinearFactorModel, TradedFactorModel
-
-    mine = _two_pass(Factors, Assets, Traded)
-    model = (TradedFactorModel(Assets, Factors) if Traded
-             else LinearFactorModel(Assets, Factors, risk_free=False))
-    lm = model.fit(cov_type="robust", debiased=True)
-
-    # params et tstats : tableaux N x (alpha + K facteurs)
-    lm_beta_t = lm.tstats[list(Factors.columns)].values
-    lm_alpha = lm.params["alpha"].values
-    lm_alpha_t = lm.tstats["alpha"].values
-    ecarts = {
-        "lambda": np.abs(mine["lambda"].values - lm.risk_premia.values).max(),
-        "t(lambda)": np.abs((mine["lambda"] / mine["lambda_se"]).values
-                            - lm.risk_premia_tstats.values).max(),
-        "beta": np.abs(mine["beta"].values - lm.betas.values).max(),
-        "t(beta)": np.abs(mine["beta_t"].values - lm_beta_t).max(),
-        "alpha": np.abs(mine["alpha"].values - lm_alpha).max(),
-        "t(alpha)": np.abs(mine["alpha_t"].values - lm_alpha_t).max(),
-        "J": abs(mine["J"] - lm.j_statistic.stat),
-        "ddl J": abs(mine["J_df"] - lm.j_statistic.df),
-        "p(J)": abs(mine["J_p"] - lm.j_statistic.pval),
-    }
-    return pd.Series(ecarts, name=f"Traded={Traded}")
-
-
 def Q1c_Resultats(factors, portfolios):
     """
-    Applique Q1_AssetPricingModel avec Traded=True et Traded=False, vérifie avec
-    linearmodels, puis enregistre les tableaux et graphiques de la question 1 c).
+    Applique Q1_AssetPricingModel avec Traded=True et Traded=False, puis
+    enregistre les tableaux et graphiques de la question 1 c).
     """
     Q = "Q1c"
     out = {tr: Q1_AssetPricingModel(factors, portfolios, Traded=tr) for tr in (True, False)}
     res = {tr: _two_pass(factors, portfolios, tr) for tr in (True, False)}
     lab = {True: "Traded=True", False: "Traded=False"}
-
-    # ---- Vérification avec linearmodels ----
-    verif = pd.concat([verify_with_linearmodels(factors, portfolios, tr)
-                       for tr in (True, False)], axis=1)
-    print("\nVérification avec linearmodels (écart absolu maximal, calcul à la main vs package) :")
-    print(verif.map(lambda v: f"{v:.1e}").to_string())
-    assert (verif < 1e-6).all().all(), "Les calculs à la main diffèrent de linearmodels"
-    save_table(verif, Q, "verification_linearmodels_ecarts_max")
 
     # ---- Tableaux ----
     # Primes de risque des deux versions côte à côte (mensuelles et annualisées)
@@ -870,7 +743,7 @@ def Q1c_Resultats(factors, portfolios):
     save_figure(fig, Q, "fig4_alphas_IC95")
     plt.close(fig)
 
-    return out, res, verif
+    return out, res
 
 
 if __name__ == "__main__":
@@ -906,4 +779,4 @@ if __name__ == "__main__":
     # Problème 1 c) : modèle en deux passes, Traded=True et Traded=False
     # ------------------------------------------------------------------
     print("\n===== Q1c - modèle linéaire d'évaluation d'actifs en deux passes =====")
-    q1c_out, q1c_res, q1c_verif = Q1c_Resultats(factors, portfolios)
+    q1c_out, q1c_res = Q1c_Resultats(factors, portfolios)
