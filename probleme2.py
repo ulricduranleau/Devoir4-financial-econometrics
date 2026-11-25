@@ -8,11 +8,12 @@ Données : le même jeu de données mensuel 1980-2021 qu'au Problème 1
 (fonction Q1_KenFrenchData de probleme1.py), en % par mois.
 
 Choix de modélisation :
-- sigma chapeau = écart-type des résidus MCO avec correction des degrés de
-  liberté, sqrt(SSR / (T - k)), où k = nombre de coefficients, constante incluse ;
+- sigma chapeau = estimateur du maximum de vraisemblance de l'écart-type des
+  résidus, sqrt(SSR / T) : cohérent avec le cadre de vraisemblance et traite le
+  modèle contraint et le non contraint de façon identique dans le test RV ;
 - les résidus standardisés e_t / sigma suivent une loi de Student t(dof)
   standard (non ramenée à une variance de 1), comme dans l'énoncé.
-
+ok 
 Tous les tableaux (.csv) et graphiques (.png) sont enregistrés dans
 resultats_probleme2/, sous le nom <question>_<titre>.
 """
@@ -65,7 +66,7 @@ def Q2_Donnees():
 def Q2_OLSStudentT(df, dof):
     """
     (i) MCO de la première colonne de df sur une constante et les autres colonnes ;
-    (ii) résidus e_t et leur écart-type estimé sigma = sqrt(SSR / (T - k)) ;
+    (ii) résidus e_t et leur écart-type estimé sigma = sqrt(SSR / T) (EMV) ;
     (iii) log-vraisemblance du modèle si z_t = e_t / sigma sont i.i.d. t(dof).
 
     La densité d'un rendement y_t est celle de e_t = sigma * z_t, soit
@@ -82,13 +83,13 @@ def Q2_OLSStudentT(df, dof):
     """
     y = df.iloc[:, 0].to_numpy()
     X = np.column_stack([np.ones(len(df)), df.iloc[:, 1:].to_numpy()])
-    T, k = X.shape
+    T = X.shape[0]
 
     # (i) MCO : b = (X'X)^-1 X'y
     b = np.linalg.solve(X.T @ X, X.T @ y)
-    # (ii) résidus et écart-type estimé (k coefficients, constante incluse)
+    # (ii) résidus et écart-type estimé par maximum de vraisemblance (division par T)
     e = y - X @ b
-    sigma = np.sqrt(e @ e / (T - k))
+    sigma = np.sqrt(e @ e / T)
     # (iii) log-vraisemblance de Student des résidus standardisés
     z = e / sigma
     log_f = (gammaln((dof + 1) / 2) - gammaln(dof / 2) - 0.5 * np.log(dof * np.pi)
@@ -126,7 +127,7 @@ def Q2_TestRV(df, dof):
 def Q2_VraisemblanceProf(df):
     """
     Évalue Q2_OLSStudentT(df, dof_j) pour dof_j = exp(j/12), j = 0, ..., 50
-    (de 1 à environ 64,7), trace la log-vraisemblance profilée en fonction des
+    (de e^0 = 1 à e^(50/12) ≈ 64,5), trace la log-vraisemblance profilée en fonction des
     degrés de liberté et retourne un tableau 51 x 2 : [dof_j, llf_j].
     """
     dof = np.exp(np.arange(51) / 12)
