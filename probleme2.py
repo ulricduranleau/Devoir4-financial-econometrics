@@ -13,7 +13,6 @@ Choix de modélisation :
   modèle contraint et le non contraint de façon identique dans le test RV ;
 - les résidus standardisés e_t / sigma suivent une loi de Student t(dof)
   standard (non ramenée à une variance de 1), comme dans l'énoncé.
-ok 
 Tous les tableaux (.csv) et graphiques (.png) sont enregistrés dans
 resultats_probleme2/, sous le nom <question>_<titre>.
 """
