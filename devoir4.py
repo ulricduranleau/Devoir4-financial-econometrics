@@ -16,6 +16,9 @@ import pandas as pd
 # Dossier contenant les CSV (le même que ce script)
 DATA_DIR = Path(__file__).resolve().parent
 
+# Dossier où sont enregistrés tous les tableaux et graphiques produits par ce code
+RESULTS_DIR = DATA_DIR / "resultats"
+
 # Période d'échantillonnage demandée
 START, END = "1980-01", "2021-12"
 
@@ -24,6 +27,36 @@ FACTOR_COLS = ["Mkt-RF", "SMB", "HML", "RMW", "CMA", "Mom"]
 
 # Expression régulière d'une ligne de données : date AAAAMM ou AAAA, puis une virgule
 _DATA_ROW = re.compile(r"^\s*\d{4,6}\s*,")
+
+
+def save_table(df, question, titre):
+    """
+    Enregistre un tableau dans resultats/ sous le nom <question>_<titre>.csv
+    (p. ex. Q1a_factors_statistiques_descriptives.csv), pour identifier
+    clairement la question et le contenu de chaque fichier.
+    """
+    RESULTS_DIR.mkdir(exist_ok=True)
+    path = RESULTS_DIR / f"{question}_{titre}.csv"
+    df.to_csv(path, float_format="%.4f")  # 4 décimales : évite le bruit de virgule flottante
+    print(f"  -> {path.relative_to(DATA_DIR)}")
+    return path
+
+
+def save_figure(fig, question, titre):
+    """Enregistre un graphique dans resultats/ sous le nom <question>_<titre>.png."""
+    RESULTS_DIR.mkdir(exist_ok=True)
+    path = RESULTS_DIR / f"{question}_{titre}.png"
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    print(f"  -> {path.relative_to(DATA_DIR)}")
+    return path
+
+
+def descriptive_stats(df):
+    """Statistiques descriptives usuelles + asymétrie et kurtosis (en excès)."""
+    stats = df.describe().T
+    stats["asymetrie"] = df.skew()
+    stats["kurtosis_exces"] = df.kurt()
+    return stats
 
 
 def _read_ff_block(filename, block=0):
@@ -104,19 +137,21 @@ if __name__ == "__main__":
     pd.set_option("display.width", 200)
     pd.set_option("display.max_columns", 20)
 
+    # ------------------------------------------------------------------
+    # Problème 1 a) : données de Ken French (excédents de rendement, % par mois)
+    # ------------------------------------------------------------------
     factors, portfolios = Q1_KenFrenchData()
 
     for name, df in [("factors", factors), ("portfolios", portfolios)]:
-        print(f"\n===== {name} : {df.shape[0]} mois x {df.shape[1]} séries "
+        print(f"\n===== Q1a - {name} : {df.shape[0]} mois x {df.shape[1]} séries "
               f"({df.index[0]} à {df.index[-1]}), en % par mois =====")
+        head, stats = df.head(), descriptive_stats(df)
         print("\n5 premières lignes :")
-        print(df.head().round(2))
+        print(head.round(2))
         print("\nStatistiques descriptives :")
-        print(df.describe().T.round(2))
+        print(stats.round(2))
 
-    # Exportation des deux objets de la question 1 a) en CSV
-    # (dates au format AAAA-MM, excédents de rendement en % par mois)
-    for name, df in [("factors", factors), ("portfolios", portfolios)]:
-        path = DATA_DIR / f"Q1a_{name}.csv"
-        df.to_csv(path, float_format="%.4f")  # évite le bruit de virgule flottante
-        print(f"\n-> {name} exporté dans {path.name}")
+        # Exportation dans resultats/ : données complètes (dont les 5 premières lignes)
+        # et statistiques descriptives
+        save_table(df, "Q1a", f"{name}_exces_rendements_mensuels_1980-2021")
+        save_table(stats, "Q1a", f"{name}_statistiques_descriptives")
