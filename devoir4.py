@@ -16,6 +16,7 @@ Sources :
 
 import io
 import re
+import textwrap
 from pathlib import Path
 
 import matplotlib.dates as mdates
@@ -151,7 +152,11 @@ def Q1_KenFrenchData():
 # Problème 1 b) : statistiques descriptives et graphiques
 # ======================================================================
 
-# Récessions américaines (pic -> creux) selon le NBER, sur la période 1980-2021
+# Récessions américaines selon le NBER : (mois du pic, mois du creux), sur 1980-2021.
+# Source : tableau officiel du NBER (mis à jour le 14/03/2023)
+# https://www.nber.org/research/data/us-business-cycle-expansions-and-contractions
+# Convention du NBER : la récession commence le mois APRÈS le pic et se termine
+# le mois du creux (inclus).
 NBER_RECESSIONS = [("1980-01", "1980-07"), ("1981-07", "1982-11"), ("1990-07", "1991-03"),
                    ("2001-03", "2001-11"), ("2007-12", "2009-06"), ("2020-02", "2020-04")]
 
@@ -159,14 +164,30 @@ NBER_RECESSIONS = [("1980-01", "1980-07"), ("1981-07", "1982-11"), ("1990-07", "
 FACTOR_LABELS = {"Mkt-RF": "Marché (Mkt-RF)", "SMB": "Taille (SMB)",
                  "HML": "Valeur (HML)", "RMW": "Rentabilité (RMW)",
                  "CMA": "Investissement (CMA)", "Mom": "Momentum (Mom)"}
-INDUSTRY_LABELS = {"Food": "Alimentation", "Mines": "Mines et minerais",
-                   "Oil": "Pétrole et charbon", "Clths": "Textile et vêtement",
-                   "Durbl": "Biens durables", "Chems": "Chimie",
-                   "Cnsum": "Biens de consommation", "Cnstr": "Construction",
-                   "Steel": "Acier", "FabPr": "Produits métalliques",
-                   "Machn": "Machinerie", "Cars": "Automobile",
-                   "Trans": "Transport", "Utils": "Services publics",
-                   "Rtail": "Commerce de détail", "Finan": "Finance", "Other": "Autres"}
+# Noms officiels (en anglais) des 17 industries de Ken French, tels qu'écrits dans
+# le fichier Siccodes17.txt de l'archive
+# https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Siccodes17.zip
+INDUSTRY_NAMES = {
+    "Food": "Food",
+    "Mines": "Mining and Minerals",
+    "Oil": "Oil and Petroleum Products",
+    "Clths": "Textiles, Apparel & Footwear",
+    "Durbl": "Consumer Durables",
+    "Chems": "Chemicals",
+    "Cnsum": "Drugs, Soap, Perfumes, Tobacco",
+    "Cnstr": "Construction and Construction Materials",
+    "Steel": "Steel Works Etc",
+    "FabPr": "Fabricated Products",
+    "Machn": "Machinery and Business Equipment",
+    "Cars": "Automobiles",
+    "Trans": "Transportation",
+    "Utils": "Utilities",
+    "Rtail": "Retail Stores",
+    "Finan": "Banks, Insurance Companies, and Other Financials",
+    "Other": "Other",
+}
+# Libellé des graphiques : « nom officiel (code) », ou le code seul s'il est identique
+INDUSTRY_LABELS = {c: c if n == c else f"{n} ({c})" for c, n in INDUSTRY_NAMES.items()}
 
 # Couleurs : palette catégorielle validée pour le daltonisme (ordre fixe),
 # encres de texte neutres, palette divergente bleu <-> rouge avec milieu gris.
@@ -204,9 +225,11 @@ def _corr_colorbar(fig, im, ax):
 def annualized_stats(df):
     """
     Statistiques par série (rendements mensuels en %), y compris annualisées :
-    moyenne x 12, volatilité x sqrt(12), ratio de Sharpe x sqrt(12) (les séries
-    sont déjà des excédents de rendement), test t de H0 : moyenne = 0 et
-    intervalle de confiance à 95 % de la moyenne annualisée.
+    moyenne x 12, volatilité x sqrt(12), ratio de Sharpe x sqrt(12) (moyenne de
+    l'excédent de rendement / écart-type), statistique t de H0 : moyenne = 0 et
+    intervalle de confiance à 95 % de la moyenne annualisée. L'asymétrie et la
+    kurtosis en excès décrivent l'épaisseur des queues (cf. Session 1 : les
+    rendements financiers ont des queues plus épaisses que la loi normale).
     """
     T = len(df)
     m, s = df.mean(), df.std()
@@ -218,7 +241,7 @@ def annualized_stats(df):
         "ecart_type_mens_%": s,
         "moyenne_ann_%": 12 * m,
         "volatilite_ann_%": np.sqrt(12) * s,
-        "ratio_Sharpe_ann": np.sqrt(12) * m / s,
+        "ratio_Sharpe_ann": np.sqrt(12) * m / s,  # séries déjà en excédents de rendement
         "t_stat_moyenne": t,
         "p_valeur_moyenne": 2 * sps.t.sf(t.abs(), T - 1),
         "IC95_bas_moyenne_ann_%": 12 * (m - q * se),
@@ -232,36 +255,10 @@ def annualized_stats(df):
     })
 
 
-def vif_table(X):
-    """
-    Facteur d'inflation de la variance de chaque colonne de X :
-    VIF_k = 1 / (1 - R²_k), où R²_k est le R² de la régression de la colonne k
-    sur toutes les autres. Équivalent aux éléments diagonaux de l'inverse de la
-    matrice de corrélation. VIF > 5-10 signale une colinéarité problématique.
-    """
-    vif = np.diag(np.linalg.inv(X.corr().values))
-    return pd.DataFrame({"VIF": vif, "R2_regression_auxiliaire": 1 - 1 / vif},
-                        index=X.columns)
-
-
-def test_equal_means(R):
-    """
-    Test de Wald de H0 : les N rendements moyens sont tous égaux.
-    On teste C·mu = 0 avec C (N-1 x N) = [I, -1] (chaque série moins la dernière).
-    W = T · (C m)' (C S C')^-1 (C m) ~ chi²(N-1) sous H0, où S est la matrice de
-    covariance empirique : le test tient compte de la corrélation entre industries.
-    """
-    T, N = R.shape
-    C = np.hstack([np.eye(N - 1), -np.ones((N - 1, 1))])
-    d = C @ R.mean().values
-    W = T * d @ np.linalg.solve(C @ R.cov().values @ C.T, d)
-    return W, N - 1, sps.chi2.sf(W, N - 1)
-
-
 def _shade_recessions(ax):
-    """Ombre les récessions NBER sur un axe dont l'abscisse est en dates."""
+    """Ombre les récessions NBER (du mois suivant le pic à la fin du mois du creux)."""
     for a, b in NBER_RECESSIONS:
-        ax.axvspan(pd.Period(a, "M").to_timestamp(),
+        ax.axvspan((pd.Period(a, "M") + 1).to_timestamp(),
                    pd.Period(b, "M").to_timestamp(how="end"),
                    color=RECESSION, lw=0, zorder=0)
 
@@ -269,7 +266,7 @@ def _shade_recessions(ax):
 RECESSION_HANDLE = Patch(color=RECESSION, label="Récession (NBER)")
 
 
-def _small_multiples(df, labels, ncols, title):
+def _small_multiples(df, labels, ncols, title, panel_w=3.6):
     """
     Un panneau par série (rendements mensuels en %), même échelle verticale pour
     toutes, afin de comparer directement les volatilités. Chaque panneau indique
@@ -277,7 +274,7 @@ def _small_multiples(df, labels, ncols, title):
     """
     n = df.shape[1]
     nrows = -(-n // ncols)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(3.6 * ncols, 1.75 * nrows + 0.9),
+    fig, axes = plt.subplots(nrows, ncols, figsize=(panel_w * ncols, 1.75 * nrows + 0.9),
                              sharex=True, sharey=True)
     axes = axes.ravel()
     x = df.index.to_timestamp()
@@ -287,7 +284,8 @@ def _small_multiples(df, labels, ncols, title):
         _shade_recessions(ax)
         ax.axhline(0, color=TEXT_2, lw=0.6)
         ax.plot(x, df[col], color=BLUE, lw=0.6)
-        ax.set_title(labels[col], loc="left")
+        # Titre sur deux lignes s'il est trop long pour la largeur du panneau
+        ax.set_title(textwrap.fill(labels[col], 50), loc="left")
         ax.text(0.99, 0.97, f"σ annualisée = {_fr(vol[col], 1)} %", transform=ax.transAxes,
                 ha="right", va="top", fontsize=7.5, color=TEXT)
         # Étiquette sélective : pire mois de la série
@@ -365,8 +363,9 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
       5. volatilité annualisée des facteurs : « quels facteurs sont les plus volatils ? »
       6. excédent moyen des portefeuilles avec IC 95 % : « plus élevés / plus bas ? »
       7. rendements cumulés des facteurs : primes réalisées dans le temps
-    Tableaux (resultats/Q1b_*.csv) : statistiques annualisées, corrélations,
-    VIF (colinéarité) et test d'égalité des rendements moyens sectoriels.
+    Tableaux (resultats/Q1b_*.csv) : statistiques annualisées des facteurs et des
+    portefeuilles, matrice de corrélation des facteurs et corrélations par paire
+    sur deux sous-périodes (« colinéarité potentielle » dans les régressions).
     """
     Q = "Q1b"
     period = f"{factors.index[0]} à {factors.index[-1]}"
@@ -390,23 +389,6 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
     pairs = pairs.reindex(pairs["1980-2021"].abs().sort_values(ascending=False).index)
     save_table(pairs, Q, "correlations_par_paire_sous_periodes")
 
-    # Colinéarité : VIF et nombre de condition de la matrice de corrélation
-    vif = vif_table(factors)
-    cond = np.linalg.cond(corr.values)
-    save_table(vif, Q, "colinearite_VIF_facteurs")
-
-    # Les écarts de rendement moyen entre industries sont-ils significatifs ?
-    W, df_w, p_w = test_equal_means(portfolios)
-    top, bot = stats_p.index[0], stats_p.index[-1]
-    diff = portfolios[top] - portfolios[bot]
-    t_d = diff.mean() / (diff.std() / np.sqrt(len(diff)))
-    tests = pd.DataFrame(
-        {"statistique": [W, t_d], "ddl": [df_w, len(diff) - 1],
-         "p_valeur": [p_w, 2 * sps.t.sf(abs(t_d), len(diff) - 1)]},
-        index=["Wald : 17 moyennes égales (chi2)",
-               f"t apparié : moyenne {top} = moyenne {bot}"])
-    save_table(tests, Q, "test_egalite_rendements_moyens_portefeuilles")
-
     # ---------------- Graphiques ----------------
     # Fig. 1 (i) : séries temporelles des 6 facteurs
     fig = _small_multiples(factors, FACTOR_LABELS, 2,
@@ -415,10 +397,9 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
     plt.close(fig)
 
     # Fig. 2 (ii) : séries temporelles des excédents des 17 portefeuilles
-    labels = {c: f"{INDUSTRY_LABELS[c]} ({c})" for c in portfolios.columns}
-    fig = _small_multiples(portfolios, labels, 3,
+    fig = _small_multiples(portfolios, INDUSTRY_LABELS, 3,
                            "Excédents de rendement mensuels des 17 portefeuilles sectoriels, "
-                           f"{period} (% par mois)")
+                           f"{period} (% par mois)", panel_w=4.4)
     save_figure(fig, Q, "fig2_series_temporelles_portefeuilles")
     plt.close(fig)
 
@@ -461,7 +442,7 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
     ax.barh(y, m.values, color=BLUE, height=0.6)
     ax.errorbar(m.values, y, xerr=err, fmt="none", ecolor=TEXT_2, elinewidth=1, capsize=2.5)
     ax.axvline(0, color=TEXT_2, lw=0.8)
-    ax.set_yticks(y, [f"{INDUSTRY_LABELS[c]} ({c})" for c in s.index])
+    ax.set_yticks(y, [INDUSTRY_LABELS[c] for c in s.index])
     for i in (0, len(s) - 1):  # étiquettes sélectives : le plus bas et le plus haut
         ax.text(s["IC95_haut_moyenne_ann_%"].iloc[i] + 0.4, i, f"{_fr(m.iloc[i], 1)} %",
                 va="center", fontsize=8, color=TEXT)
@@ -503,19 +484,13 @@ def Q1b_StatistiquesGraphiques(factors, portfolios):
     print("Volatilité annualisée des facteurs (%), du plus au moins volatil :")
     print(stats_f["volatilite_ann_%"].round(2).to_string())
     print("\nExcédent moyen annualisé des portefeuilles (%), du plus haut au plus bas :")
-    print(stats_p[["moyenne_ann_%", "t_stat_moyenne", "volatilite_ann_%",
-                   "ratio_Sharpe_ann"]].round(2).to_string())
-    print(f"\nTest d'égalité des 17 moyennes : W = {W:.2f}, ddl = {df_w}, p = {p_w:.3f}")
-    print(f"Test t apparié {top} vs {bot} : t = {t_d:.2f}")
+    print(stats_p[["moyenne_ann_%", "IC95_bas_moyenne_ann_%", "IC95_haut_moyenne_ann_%",
+                   "t_stat_moyenne", "volatilite_ann_%", "ratio_Sharpe_ann"]].round(2).to_string())
     print("\nCorrélations par paire (triées par |corr| sur 1980-2021) :")
     print(pairs.round(2).head(6).to_string())
-    print("\nColinéarité (VIF) :")
-    print(vif.round(2).to_string())
-    print(f"Nombre de condition de la matrice de corrélation : {cond:.1f}")
 
     return {"stats_facteurs": stats_f, "stats_portefeuilles": stats_p,
-            "correlation": corr, "correlations_sous_periodes": pairs,
-            "vif": vif, "nombre_condition": cond, "tests_moyennes": tests}
+            "correlation": corr, "correlations_sous_periodes": pairs}
 
 
 if __name__ == "__main__":
